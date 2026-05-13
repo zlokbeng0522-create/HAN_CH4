@@ -1,0 +1,352 @@
+function mswind()
+k_default = 0.05;
+% 通用文献路径占位符（请替换为实际路径）
+ncFolder  = '【请替换为NC文件目录路径】';  % 示例: 'H:\output'
+sspList   = {'126','245','370','585'};
+
+% Shapefile路径占位符（请替换为实际路径）
+provPath     = '【请替换为中国省份底图路径】';  % 示例: 'CH4_CHN05098_NO_TaIWan.shp'
+taiwanPath   = '【请替换为台湾地区底图路径】';  % 示例: 'TAIWAN.shp'
+hkmoPath     = '【请替换为港澳地区底图路径】';  % 示例: '001.shp'
+nineLinePath = '【请替换为九段线数据路径】';    % 示例: 'nine\九段线.shp'
+
+natureColors = [0.00, 0.45, 0.74;
+                0.85, 0.33, 0.10;
+                0.47, 0.67, 0.19;
+                0.49, 0.18, 0.56];
+
+E_data   = cell(length(sspList), 1);
+lon_full = [];
+lat_full = [];
+
+nyr = 86;
+year_all = 2015:2100;
+
+for s = 1:length(sspList)
+    fname = fullfile(ncFolder, ['E_SSP', sspList{s}, '.nc']);
+    if ~exist(fname, 'file')
+        error('');
+    end
+    lon = ncread(fname, 'lon');
+    lat = ncread(fname, 'lat');
+    
+    E = ncread(fname, 'E_annual_mean');
+    sz = size(E);
+    if length(sz) ~= 3
+        error('');
+    end
+    if sz(1) == length(lon) && sz(2) == length(lat)
+        E_perm = E;
+    elseif sz(1) == length(lat) && sz(2) == length(lon)
+        E_perm = permute(E, [2,1,3]);
+    else
+        error('');
+    end
+    if size(E_perm, 3) ~= nyr
+        error('');
+    end
+    E_data{s} = E_perm;
+    if isempty(lon_full)
+        lon_full = lon(:)';
+        lat_full = lat(:)';
+    end
+end
+
+lon_mask = lon_full >= 70 & lon_full <= 140;
+lat_mask = lat_full >= 15 & lat_full <= 55;
+lon_cn = lon_full(lon_mask);
+lat_cn = lat_full(lat_mask);
+nlon = length(lon_cn);
+nlat = length(lat_cn);
+
+for s = 1:length(sspList)
+    E_data{s} = E_data{s}(lon_mask, lat_mask, :);
+end
+
+[Lon_grid, Lat_grid] = meshgrid(lon_cn, lat_cn);
+Lon_vec = Lon_grid(:);
+Lat_vec = Lat_grid(:);
+
+provShape = shaperead(provPath);
+taiwanShape = shaperead(taiwanPath);
+hkmoShape = shaperead(hkmoPath);
+nineLines = shaperead(nineLinePath);
+
+provCN = containers.Map;
+provCN('BJ') = '北京'; provCN('TJ') = '天津'; provCN('HE') = '河北';
+provCN('SX') = '山西'; provCN('NM') = '内蒙古'; provCN('LN') = '辽宁';
+provCN('JL') = '吉林'; provCN('HL') = '黑龙江'; provCN('SH') = '上海';
+provCN('JS') = '江苏'; provCN('ZJ') = '浙江'; provCN('AH') = '安徽';
+provCN('FJ') = '福建'; provCN('JX') = '江西'; provCN('SD') = '山东';
+provCN('HA') = '河南'; provCN('HB') = '湖北'; provCN('HN') = '湖南';
+provCN('GD') = '广东'; provCN('GX') = '广西'; provCN('HI') = '海南';
+provCN('CQ') = '重庆'; provCN('SC') = '四川'; provCN('GZ') = '贵州';
+provCN('YN') = '云南'; provCN('XZ') = '西藏'; provCN('SN') = '陕西';
+provCN('GS') = '甘肃'; provCN('QH') = '青海'; provCN('NX') = '宁夏';
+provCN('XJ') = '新疆'; provCN('TW') = '台湾'; provCN('HKMO') = '港澳';
+
+provCode = {'BJ','TJ','HE','SX','NM','LN','JL','HL','SH','JS','ZJ',...
+            'AH','FJ','JX','SD','HA','HB','HN','GD','GX','HI','CQ',...
+            'SC','GZ','YN','XZ','SN','GS','QH','NX','XJ'};
+enNameAliases = {
+    {'Beijing'}, {'Tianjin'}, {'Hebei'}, {'Shanxi'}, ...
+    {'Nei Mongol','Inner Mongolia','Inner Mongol'}, ...
+    {'Liaoning'}, {'Jilin'}, {'Heilongjiang'}, {'Shanghai'}, ...
+    {'Jiangsu'}, {'Zhejiang'}, {'Anhui'}, {'Fujian'}, ...
+    {'Jiangxi'}, {'Shandong'}, {'Henan'}, {'Hubei'}, ...
+    {'Hunan'}, {'Guangdong'}, {'Guangxi'}, {'Hainan'}, ...
+    {'Chongqing'}, {'Sichuan'}, {'Guizhou'}, {'Yunnan'}, ...
+    {'Xizang','Tibet'}, ...
+    {'Shaanxi'}, {'Gansu'}, {'Qinghai'}, {'Ningxia'}, ...
+    {'Xinjiang'}
+};
+
+provPolygons = struct('X', {}, 'Y', {}, 'Code', {});
+for i = 1:length(provShape)
+    if isfield(provShape, 'NAME')
+        nameField = provShape(i).NAME;
+    elseif isfield(provShape, 'name')
+        nameField = provShape(i).name;
+    elseif isfield(provShape, 'ENG_NAME')
+        nameField = provShape(i).ENG_NAME;
+    else
+        continue;
+    end
+    nameStr = strtrim(string(nameField));
+    matchedCode = '';
+    for j = 1:length(enNameAliases)
+        if any(strcmpi(nameStr, enNameAliases{j}))
+            matchedCode = provCode{j};
+            break;
+        end
+    end
+    if ~isempty(matchedCode)
+        provPolygons(end+1).X = provShape(i).X;
+        provPolygons(end).Y   = provShape(i).Y;
+        provPolygons(end).Code = matchedCode;
+    end
+end
+
+if ~isempty(taiwanShape)
+    for i = 1:length(taiwanShape)
+        provPolygons(end+1).X = taiwanShape(i).X;
+        provPolygons(end).Y   = taiwanShape(i).Y;
+        provPolygons(end).Code = 'TW';
+    end
+end
+if ~isempty(hkmoShape)
+    for i = 1:length(hkmoShape)
+        provPolygons(end+1).X = hkmoShape(i).X;
+        provPolygons(end).Y   = hkmoShape(i).Y;
+        provPolygons(end).Code = 'HKMO';
+    end
+end
+
+validProvIdx = [];
+for idx = 1:length(provPolygons)
+    inGrid = inpolygon(Lon_vec, Lat_vec, provPolygons(idx).X, provPolygons(idx).Y);
+    if any(inGrid)
+        validProvIdx(end+1) = idx;
+    end
+end
+
+mainFig = figure('Name', '', 'NumberTitle', 'off', ...
+                 'Position', [100 100 900 700]);
+
+worldmap([15 55], [70 140]);
+
+gridm off; mlabel off; plabel off;
+setm(gca, 'Frame', 'off');
+hold on;
+
+for i = 1:length(provShape)
+    patchm(provShape(i).Y, provShape(i).X, 0, ...
+           'FaceColor', [0.92 0.92 0.92], 'EdgeColor', 'k', 'LineWidth', 0.4);
+end
+for i = 1:length(taiwanShape)
+    patchm(taiwanShape(i).Y, taiwanShape(i).X, 0, ...
+           'FaceColor', [0.92 0.92 0.92], 'EdgeColor', 'k', 'LineWidth', 0.4);
+end
+for i = 1:length(hkmoShape)
+    patchm(hkmoShape(i).Y, hkmoShape(i).X, 0, ...
+           'FaceColor', [0.92 0.92 0.92], 'EdgeColor', 'k', 'LineWidth', 0.4);
+end
+
+for i = 1:length(nineLines)
+    plotm(nineLines(i).Y, nineLines(i).X, 'r--', 'LineWidth', 1.2);
+end
+
+title('');
+
+uicontrol('Style', 'pushbutton', 'String', '选择省份', ...
+          'Position', [20 20 80 30], ...
+          'Callback', @(src,~) selectProvince());
+uicontrol('Style', 'pushbutton', 'String', '自动播放', ...
+          'Position', [110 20 80 30], ...
+          'Callback', @(src,~) startAutoPlay());
+uicontrol('Style', 'pushbutton', 'String', '停止', ...
+          'Position', [200 20 50 30], ...
+          'Callback', @(src,~) stopAutoPlay());
+
+state = struct();
+state.provCode = '';
+state.ts_scenario = [];
+state.k = k_default;
+state.curveFig = [];
+state.slider = [];
+state.lineHandles = [];
+state.autoTimer = [];
+state.autoIdx = 1;
+
+    function selectProvince()
+        [lat_click, lon_click] = inputm(1);
+        if isempty(lat_click)
+            return;
+        end
+        found = false;
+        provIdx = 0;
+        for i = 1:length(provPolygons)
+            in = inpolygon(lon_click, lat_click, ...
+                           provPolygons(i).X, provPolygons(i).Y);
+            if in
+                provIdx = i;
+                found = true;
+                break;
+            end
+        end
+        if ~found
+            warndlg('', '');
+            return;
+        end
+        stopAutoPlay();
+        showProvince(provPolygons(provIdx).Code);
+    end
+
+    function showProvince(code)
+        idx = find(strcmp({provPolygons.Code}, code), 1);
+        if isempty(idx)
+            warndlg('', '');
+            return;
+        end
+        inGrid = inpolygon(Lon_vec, Lat_vec, ...
+                           provPolygons(idx).X, provPolygons(idx).Y);
+        if ~any(inGrid)
+            warndlg('', '');
+            return;
+        end
+        ts = zeros(length(sspList), nyr);
+        for s = 1:length(sspList)
+            E3d = E_data{s};
+            for yr = 1:nyr
+                slab = E3d(:, :, yr);
+                vals = slab(inGrid);
+                ts(s, yr) = mean(vals, 'omitnan');
+            end
+        end
+        state.provCode = code;
+        state.ts_scenario = ts;
+        updateCurveFig();
+    end
+
+    function updateCurveFig()
+        code = state.provCode;
+        ts   = state.ts_scenario;
+        k    = state.k;
+        
+        if isempty(state.curveFig) || ~ishandle(state.curveFig)
+            state.curveFig = figure('Name', '', ...
+                                   'NumberTitle', 'off', ...
+                                   'Position', [150 150 700 500]);
+            hold on;
+            hLines = gobjects(length(sspList), 1);
+            for s = 1:length(sspList)
+                delta = compute_delta(ts(s,:), k);
+                hLines(s) = plot(year_all, delta, 'Color', natureColors(s,:), ...
+                                 'LineWidth', 2.5);
+            end
+            hold off;
+            xlabel('');
+            ylabel('');
+            title('');
+            legend({'SSP126','SSP245','SSP370','SSP585'}, 'Location', 'best');
+            grid on;
+            set(gca, 'FontSize', 10);
+            
+            state.lineHandles = hLines;
+            
+            state.slider = uicontrol('Style', 'slider', ...
+                'Min', 0.001, 'Max', 0.5, 'Value', k, ...
+                'Position', [150 20 400 20], ...
+                'Callback', @(src,~) updateK(src.Value));
+            uicontrol('Style', 'text', ...
+                'String', '', ...
+                'Position', [20 20 100 20], 'FontSize', 9);
+        else
+            figure(state.curveFig);
+            for s = 1:length(sspList)
+                delta = compute_delta(ts(s,:), k);
+                set(state.lineHandles(s), 'YData', delta);
+            end
+            title('');
+            set(state.slider, 'Value', k);
+            drawnow;
+        end
+    end
+
+    function updateK(newK)
+        if isempty(state.ts_scenario)
+            return;
+        end
+        state.k = newK;
+        ts = state.ts_scenario;
+        for s = 1:length(sspList)
+            delta = compute_delta(ts(s,:), newK);
+            set(state.lineHandles(s), 'YData', delta);
+        end
+        title(get(state.curveFig, 'CurrentAxes'), '');
+        drawnow;
+    end
+
+    function delta = compute_delta(E_ts, k)
+        delta = zeros(1, nyr);
+        for y = 1:nyr
+            w = 0;
+            for i = 1:y
+                weight = exp(-k * (y - i)) * (1 - exp(-k));
+                w = w + E_ts(i) * weight;
+            end
+            delta(y) = w;
+        end
+    end
+
+    function startAutoPlay()
+        if ~isempty(state.autoTimer)
+            stopAutoPlay();
+        end
+        state.autoIdx = 1;
+        state.autoTimer = timer('ExecutionMode', 'fixedRate', ...
+                                'Period', 2, ...
+                                'TimerFcn', @(~,~) autoPlayStep());
+        start(state.autoTimer);
+    end
+
+    function autoPlayStep()
+        if state.autoIdx > length(validProvIdx)
+            stopAutoPlay();
+            return;
+        end
+        provIdx = validProvIdx(state.autoIdx);
+        code = provPolygons(provIdx).Code;
+        showProvince(code);
+        state.autoIdx = state.autoIdx + 1;
+    end
+
+    function stopAutoPlay()
+        if ~isempty(state.autoTimer)
+            stop(state.autoTimer);
+            delete(state.autoTimer);
+            state.autoTimer = [];
+        end
+    end
+
+end
